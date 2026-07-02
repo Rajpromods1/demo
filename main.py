@@ -1,7 +1,7 @@
-import requests
 import time
 import threading
 import os
+import cloudscraper
 from flask import Flask
 
 # --- FLASK WEB SERVER ---
@@ -18,27 +18,24 @@ API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.jso
 
 def fetch_live_data():
     try:
-        # Browser jaisa dikhne ke liye Headers add kiye hain
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Connection': 'keep-alive'
-        }
+        # Normal requests ki jagah CloudScraper ka use kar rahe hain
+        scraper = cloudscraper.create_scraper(browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'desktop': True
+        })
         
-        response = requests.get(API_URL, headers=headers, timeout=10)
+        response = scraper.get(API_URL, timeout=15)
         
-        # Agar website ne block kar diya (403, 500, 404 error)
         if response.status_code != 200:
             return None, None, f"Blocked by Site! HTTP Status: {response.status_code}"
             
         try:
             data = response.json()
         except ValueError:
-            # Agar JSON ki jagah HTML/Captcha de raha hai
-            return None, None, "Site is sending HTML/Captcha instead of JSON data."
+            return None, None, "Site is sending HTML/Captcha instead of JSON."
         
-        # Note: 'issueNumber' aur 'result' ki exact key
+        # Exact keys for your API
         period_number = data['data'][0]['issueNumber']
         actual_result = data['data'][0]['result'] 
         
