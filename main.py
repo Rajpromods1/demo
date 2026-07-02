@@ -11,24 +11,42 @@ app = Flask(__name__)
 total_predictions = 0
 total_wins = 0
 total_losses = 0
-history = [] # Ab isme unlimited history save hogi
+history = []
 
 # API URL
 API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 def fetch_live_data():
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(API_URL, headers=headers, timeout=10)
-        data = response.json()
+        # Browser jaisa dikhne ke liye Headers add kiye hain
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Connection': 'keep-alive'
+        }
         
-        # Note: Agar API structure alag hua toh yahan KeyError aayega
+        response = requests.get(API_URL, headers=headers, timeout=10)
+        
+        # Agar website ne block kar diya (403, 500, 404 error)
+        if response.status_code != 200:
+            return None, None, f"Blocked by Site! HTTP Status: {response.status_code}"
+            
+        try:
+            data = response.json()
+        except ValueError:
+            # Agar JSON ki jagah HTML/Captcha de raha hai
+            return None, None, "Site is sending HTML/Captcha instead of JSON data."
+        
+        # Note: 'issueNumber' aur 'result' ki exact key
         period_number = data['data'][0]['issueNumber']
         actual_result = data['data'][0]['result'] 
         
         return period_number, int(actual_result), None
+        
+    except KeyError as e:
+        return None, None, f"Data format mismatch. Missing Key: {e}"
     except Exception as e:
-        # Agar koi error aaya toh string return karenge taaki page pe dikhe
         return None, None, str(e)
 
 def run_system():
@@ -36,7 +54,7 @@ def run_system():
     
     sequence = ["Big", "Big", "Big", "Small", "Small", "Small"]
     step_index = 0
-    last_period = None # Duplicate entry rokne ke liye
+    last_period = None
     
     print("✅ Background System Started!")
     
@@ -45,8 +63,7 @@ def run_system():
         period_number, actual_result, error_msg = fetch_live_data()
         
         if error_msg:
-            # Agar API theek se kaam nahi kar rahi
-            history.insert(0, f"⚠️ API Error: {error_msg}")
+            history.insert(0, f"⚠️ Error: {error_msg}")
         elif period_number and period_number != last_period:
             status = "Wait/Pending"
             
@@ -61,15 +78,12 @@ def run_system():
                     status = "🔴 LOSS"
                     total_losses += 1
 
-            # Log record banaye
             record = f"Period: {period_number} | Pred: {prediction} | Actual: {actual_result} | Status: {status}"
-            
-            # History list mein add karein (Ab koi pop() nahi hai, sab save hoga)
             history.insert(0, record)
             last_period = period_number
-            step_index += 1 # Agle step pe jao
+            step_index += 1 
             
-        time.sleep(30) # 30 seconds wait for next period
+        time.sleep(30) 
 
 # --- WEBSITE INTERFACE ---
 @app.route('/')
@@ -80,7 +94,6 @@ def home():
     <head>
         <title>Bot Live Stats</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <!-- Page ab automatically har 30 seconds mein refresh hoga -->
         <meta http-equiv="refresh" content="30"> 
     </head>
     <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f9;">
@@ -93,7 +106,6 @@ def home():
             <hr>
             <h3 style="color: #333;">🕒 Complete History</h3>
             
-            <!-- Scrollbox banaya hai taaki 10k history aane par page kharab na ho -->
             <div style="height: 400px; overflow-y: auto; background: #fafafa; padding: 10px; border: 1px solid #ccc; border-radius: 5px;">
                 <ul style="line-height: 1.8; margin: 0; padding-left: 20px;">
     """
@@ -122,7 +134,6 @@ def home():
     """
     return html
 
-# --- BACKGROUND THREAD SETUP ---
 def start_background_task():
     thread = threading.Thread(target=run_system)
     thread.daemon = True
