@@ -1,8 +1,8 @@
 import time
 import threading
 import os
-import cloudscraper
 from flask import Flask
+from curl_cffi import requests
 
 # --- FLASK WEB SERVER ---
 app = Flask(__name__)
@@ -14,37 +14,37 @@ total_losses = 0
 history = []
 
 # API URL
-API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
+# Hum directly link ko hit karne ki jagah 'corsproxy' ka use kar rahe hain taaki Render ka IP hide ho jaye
+ACTUAL_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
+PROXY_URLS = [
+    ACTUAL_API,  # Pehle direct try karega
+    f"https://corsproxy.io/?{ACTUAL_API}", # Agar block hua toh Proxy 1
+    f"https://api.allorigins.win/raw?url={ACTUAL_API}" # Agar block hua toh Proxy 2
+]
 
 def fetch_live_data():
-    try:
-        # Normal requests ki jagah CloudScraper ka use kar rahe hain
-        scraper = cloudscraper.create_scraper(browser={
-            'browser': 'chrome',
-            'platform': 'windows',
-            'desktop': True
-        })
-        
-        response = scraper.get(API_URL, timeout=15)
-        
-        if response.status_code != 200:
-            return None, None, f"Blocked by Site! HTTP Status: {response.status_code}"
-            
+    error_msg = "Unknown Error"
+    
+    # Hum 3 alag-alag rasto (links) se data laane ki koshish karenge
+    for url in PROXY_URLS:
         try:
-            data = response.json()
-        except ValueError:
-            return None, None, "Site is sending HTML/Captcha instead of JSON."
-        
-        # Exact keys for your API
-        period_number = data['data'][0]['issueNumber']
-        actual_result = data['data'][0]['result'] 
-        
-        return period_number, int(actual_result), None
-        
-    except KeyError as e:
-        return None, None, f"Data format mismatch. Missing Key: {e}"
-    except Exception as e:
-        return None, None, str(e)
+            # Impersonate="chrome110" Cloudflare ko ye batata hai ki ye asli Chrome browser hai
+            response = requests.get(url, impersonate="chrome110", timeout=15)
+            
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    period_number = data['data'][0]['issueNumber']
+                    actual_result = data['data'][0]['result'] 
+                    return period_number, int(actual_result), None
+                except Exception:
+                    continue # Agar HTML page mila, toh dusra proxy try karo
+                    
+        except Exception as e:
+            error_msg = str(e)
+            continue
+            
+    return None, None, f"All proxies blocked. Last HTTP Status: 403"
 
 def run_system():
     global total_predictions, total_wins, total_losses, history
@@ -53,7 +53,7 @@ def run_system():
     step_index = 0
     last_period = None
     
-    print("✅ Background System Started!")
+    print("✅ Background System Started with Anti-Blocker!")
     
     while True:
         prediction = sequence[step_index % 6]
@@ -138,5 +138,4 @@ def start_background_task():
 
 if __name__ == "__main__":
     start_background_task()
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    port = int(os.environ.get("PORT", 10000
