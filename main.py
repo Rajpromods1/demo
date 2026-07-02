@@ -7,11 +7,11 @@ from flask import Flask
 # --- FLASK WEB SERVER ---
 app = Flask(__name__)
 
-# --- GLOBAL VARIABLES (Stats save karne ke liye) ---
+# --- GLOBAL VARIABLES ---
 total_predictions = 0
 total_wins = 0
 total_losses = 0
-history = []
+history = [] # Ab isme unlimited history save hogi
 
 # API URL
 API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
@@ -22,32 +22,35 @@ def fetch_live_data():
         response = requests.get(API_URL, headers=headers, timeout=10)
         data = response.json()
         
-        # Note: 'issueNumber' aur 'result' API ke mutabiq
+        # Note: Agar API structure alag hua toh yahan KeyError aayega
         period_number = data['data'][0]['issueNumber']
         actual_result = data['data'][0]['result'] 
         
-        return period_number, int(actual_result)
+        return period_number, int(actual_result), None
     except Exception as e:
-        print(f"API Error: {e}")
-        return None, None
+        # Agar koi error aaya toh string return karenge taaki page pe dikhe
+        return None, None, str(e)
 
 def run_system():
     global total_predictions, total_wins, total_losses, history
     
     sequence = ["Big", "Big", "Big", "Small", "Small", "Small"]
     step_index = 0
+    last_period = None # Duplicate entry rokne ke liye
     
     print("✅ Background System Started!")
     
     while True:
         prediction = sequence[step_index % 6]
-        period_number, actual_result = fetch_live_data()
+        period_number, actual_result, error_msg = fetch_live_data()
         
-        if period_number:
+        if error_msg:
+            # Agar API theek se kaam nahi kar rahi
+            history.insert(0, f"⚠️ API Error: {error_msg}")
+        elif period_number and period_number != last_period:
             status = "Wait/Pending"
             
             if actual_result is not None:
-                # Sirf tabhi count badhaye jab result aa jaye
                 total_predictions += 1
                 
                 # Logic: Big = 5 to 9 | Small = 0 to 4
@@ -60,26 +63,25 @@ def run_system():
 
             # Log record banaye
             record = f"Period: {period_number} | Pred: {prediction} | Actual: {actual_result} | Status: {status}"
-            print(record) # Render Logs ke liye
             
-            # Website pe dikhane ke liye History list mein add karein (Sirf last 10 dikhayenge)
+            # History list mein add karein (Ab koi pop() nahi hai, sab save hoga)
             history.insert(0, record)
-            if len(history) > 10:
-                history.pop()
-        
-        step_index += 1
+            last_period = period_number
+            step_index += 1 # Agle step pe jao
+            
         time.sleep(30) # 30 seconds wait for next period
 
-# --- WEBSITE INTERFACE PAR STATS DIKHANE KE LIYE ---
+# --- WEBSITE INTERFACE ---
 @app.route('/')
 def home():
-    # Simple HTML Page jo live data dikhayega
     html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <title>Bot Live Stats</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <!-- Page ab automatically har 30 seconds mein refresh hoga -->
+        <meta http-equiv="refresh" content="30"> 
     </head>
     <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f9;">
         <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0px 0px 10px rgba(0,0,0,0.1);">
@@ -89,26 +91,31 @@ def home():
             <h3 style="color: green;"><b>Total Wins:</b> {total_wins}</h3>
             <h3 style="color: red;"><b>Total Losses:</b> {total_losses}</h3>
             <hr>
-            <h3 style="color: #333;">🕒 Recent History (Last 10)</h3>
-            <ul style="line-height: 1.8;">
+            <h3 style="color: #333;">🕒 Complete History</h3>
+            
+            <!-- Scrollbox banaya hai taaki 10k history aane par page kharab na ho -->
+            <div style="height: 400px; overflow-y: auto; background: #fafafa; padding: 10px; border: 1px solid #ccc; border-radius: 5px;">
+                <ul style="line-height: 1.8; margin: 0; padding-left: 20px;">
     """
     
     if not history:
-        html += "<li>Waiting for first result... Please refresh after 30 seconds.</li>"
+        html += "<li>Waiting for first result... Fetching from API.</li>"
     else:
         for item in history:
-            # Color fix for list items
             if "WIN" in item:
                 html += f"<li style='color: green;'><b>{item}</b></li>"
             elif "LOSS" in item:
                 html += f"<li style='color: red;'><b>{item}</b></li>"
+            elif "Error" in item:
+                html += f"<li style='color: orange;'><b>{item}</b></li>"
             else:
                 html += f"<li>{item}</li>"
 
     html += """
-            </ul>
+                </ul>
+            </div>
             <br>
-            <p><small><i>🔄 Refresh the page to see the latest data.</i></small></p>
+            <p><small><i>🔄 Page is auto-refreshing every 30 seconds.</i></small></p>
         </div>
     </body>
     </html>
